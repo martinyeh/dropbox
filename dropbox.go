@@ -248,7 +248,6 @@ func (db *Dropbox) Auth() error {
 		return err
 	}
 	db.token = t.Token()
-
 	db.token.TokenType = "Bearer"
 	return nil
 }
@@ -375,7 +374,7 @@ func (db *Dropbox) CommitChunkedUpload(uploadid, dst string, overwrite bool, par
 }
 
 // ChunkedUpload sends a chunk with a maximum size of chunksize, if there is no session a new one is created.
-func (db *Dropbox) ChunkedUpload(session *ChunkUploadResponse, input io.ReadCloser, chunksize int ) (*ChunkUploadResponse, error) {
+func (db *Dropbox) ChunkedUpload(session *ChunkUploadResponse, input io.ReadCloser, chunksize int) (*ChunkUploadResponse, error) {
 	var err error
 	var rawurl string
 	var cur ChunkUploadResponse
@@ -425,7 +424,7 @@ func (db *Dropbox) UploadByChunk(input io.ReadCloser, chunksize int, dst string,
 	var cur *ChunkUploadResponse
 
 	for err == nil {
-		if cur, err = db.ChunkedUpload(cur, input, chunksize ); err != nil && err != io.EOF {
+		if cur, err = db.ChunkedUpload(cur, input, chunksize); err != nil && err != io.EOF {
 			return nil, err
 		}
 	}
