@@ -89,6 +89,7 @@ type ChunkUploadResponse struct {
 	UploadID string `json:"upload_id"` // Unique ID of this upload.
 	Offset   int    `json:"offset"`    // Size in bytes of already sent data.
 	Expires  DBTime `json:"expires"`   // Expiration time of this upload.
+	Chunk    []byte `json:"chunk"`
 }
 
 // Format of reply when http error code is not 200.
@@ -96,7 +97,9 @@ type ChunkUploadResponse struct {
 // {"error": "reason"}
 // {"error": {"param": "reason"}}
 type requestError struct {
+	UploadID string `json:"upload_id"` // Unique ID of this upload.
 	Error interface{} `json:"error"` // Description of this error.
+	Offset int64  `json:"offset"`
 }
 
 const (
@@ -245,6 +248,7 @@ func (db *Dropbox) Auth() error {
 		return err
 	}
 	db.token = t.Token()
+
 	db.token.TokenType = "Bearer"
 	return nil
 }
@@ -285,10 +289,11 @@ func getResponse(r *http.Response) ([]byte, error) {
 	if r.StatusCode == http.StatusOK {
 		return b, nil
 	}
+
 	if err = json.Unmarshal(b, &e); err == nil {
 		switch v := e.Error.(type) {
 		case string:
-			return nil, newErrorf(r.StatusCode, "%s", v)
+			return b, newErrorf(r.StatusCode, "%s", v)
 		case map[string]interface{}:
 			for param, reason := range v {
 				if reasonstr, ok := reason.(string); ok {
@@ -307,6 +312,32 @@ func urlEncode(s string) string {
 	encoded := url.QueryEscape(s)
 	encoded = strings.Replace(encoded, "+", "%20", -1)
 	return encoded
+}
+
+
+// TransferStatus return the current offest of an uploadID
+func (db *Dropbox) TransferStatus(uploadid string) (int64, error){
+        var err error
+	var rawurl string
+	var body []byte
+	var response *http.Response
+
+	rawurl = fmt.Sprintf("%s/chunked_upload?upload_id=%s", db.APIContentURL, uploadid)
+
+
+	if response, err = db.client().Post(rawurl, "text/plain", nil); err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if body, err = getResponse(response); err != nil {
+		var re requestError
+		json.Unmarshal(body, &re)
+		fmt.Println("request error:", re)
+
+		return re.Offset, err
+	}
+
+        return 0, err
 }
 
 // CommitChunkedUpload ends the chunked upload by giving a name to the UploadID.
@@ -344,7 +375,7 @@ func (db *Dropbox) CommitChunkedUpload(uploadid, dst string, overwrite bool, par
 }
 
 // ChunkedUpload sends a chunk with a maximum size of chunksize, if there is no session a new one is created.
-func (db *Dropbox) ChunkedUpload(session *ChunkUploadResponse, input io.ReadCloser, chunksize int) (*ChunkUploadResponse, error) {
+func (db *Dropbox) ChunkedUpload(session *ChunkUploadResponse, input io.ReadCloser, chunksize int ) (*ChunkUploadResponse, error) {
 	var err error
 	var rawurl string
 	var cur ChunkUploadResponse
@@ -363,15 +394,24 @@ func (db *Dropbox) ChunkedUpload(session *ChunkUploadResponse, input io.ReadClos
 	} else {
 		rawurl = fmt.Sprintf("%s/chunked_upload", db.APIContentURL)
 	}
+	
 	r = &io.LimitedReader{R: input, N: int64(chunksize)}
 
 	if response, err = db.client().Post(rawurl, "application/octet-stream", r); err != nil {
 		return nil, err
 	}
 	defer response.Body.Close()
+	
 	if body, err = getResponse(response); err != nil {
+		/*var re requestError 
+		json.Unmarshal(body, &re)
+		fmt.Println("request error:", re)
+               
+		cur.UploadID = re.UploadID
+		cur.Offset = re.Offset*/
 		return nil, err
 	}
+
 	err = json.Unmarshal(body, &cur)
 	if r.N != 0 {
 		err = io.EOF
@@ -385,7 +425,7 @@ func (db *Dropbox) UploadByChunk(input io.ReadCloser, chunksize int, dst string,
 	var cur *ChunkUploadResponse
 
 	for err == nil {
-		if cur, err = db.ChunkedUpload(cur, input, chunksize); err != nil && err != io.EOF {
+		if cur, err = db.ChunkedUpload(cur, input, chunksize ); err != nil && err != io.EOF {
 			return nil, err
 		}
 	}
